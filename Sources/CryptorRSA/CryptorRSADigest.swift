@@ -135,16 +135,16 @@ extension Data {
 				switch self {
 		
 				case .sha1:
-					return (.init(EVP_sha1()), .init(EVP_aes_256_cbc()), RSA_PKCS1_OAEP_PADDING)
+					return (.init(EVP_sha1()), .init(EVP_aes_128_gcm()), RSA_PKCS1_OAEP_PADDING)
 		
 				case .sha224:
-					return (.init(EVP_sha224()), .init(EVP_aes_256_cbc()), RSA_PKCS1_OAEP_PADDING)
+					return (.init(EVP_sha224()), .init(EVP_aes_128_gcm()), RSA_PKCS1_OAEP_PADDING)
 		
 				case .sha256:
-					return (.init(EVP_sha256()), .init(EVP_aes_256_cbc()), RSA_PKCS1_OAEP_PADDING)
+					return (.init(EVP_sha256()), .init(EVP_aes_128_gcm()), RSA_PKCS1_OAEP_PADDING)
 		
 				case .sha384:
-					return (.init(EVP_sha384()), .init(EVP_aes_256_cbc()), RSA_PKCS1_OAEP_PADDING)
+					return (.init(EVP_sha384()), .init(EVP_aes_128_gcm()), RSA_PKCS1_OAEP_PADDING)
 		
 				case .sha512:
 					return (.init(EVP_sha512()), .init(EVP_aes_128_gcm()), RSA_PKCS1_OAEP_PADDING)

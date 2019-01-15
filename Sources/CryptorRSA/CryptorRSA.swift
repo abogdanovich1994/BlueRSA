@@ -258,12 +258,12 @@ public class CryptorRSA {
                 // Assign size of the corresponding cipher's IV
 				let IVLength = EVP_CIPHER_iv_length(.make(optional: enc))
                 let iv = UnsafeMutablePointer<UInt8>.allocate(capacity: Int(IVLength))
-                
+               print("encrypt: IV length = \(IVLength)") 
                 let encrypted = UnsafeMutablePointer<UInt8>.allocate(capacity: self.data.count + Int(IVLength))
                 var encKeyLength: Int32 = 0
                 var processedLength: Int32 = 0
                 var encLength: Int32 = 0
-                
+
                 // Initializes a cipher context ctx for encryption with cipher type using a random secret key and IV.
                 // The secret key is encrypted using the public key (evp_key can be an array of public keys)
                 // Here we are using just 1 public key
@@ -285,6 +285,7 @@ public class CryptorRSA {
                     return EVP_EncryptUpdate(rsaEncryptCtx, encrypted, &processedLength, plaintext, Int32(self.data.count))
                 })
                 encLength = processedLength
+print("encrypt: processedLength = \(processedLength), dataLength = \(encLength)")
                 
                 status = EVP_SealFinal(rsaEncryptCtx, encrypted.advanced(by: Int(encLength)), &processedLength)
                 guard status == 1 else {
@@ -296,12 +297,24 @@ public class CryptorRSA {
                     throw Error(code: ERR_ENCRYPTION_FAILED, reason: source + ": No OpenSSL error reported.")
                 }
                 encLength += processedLength
-                
+print("encrypt: processedLength = \(processedLength), dataLength = \(encLength)")
+print("encrypt: key length = \(encKeyLength)")
+
+let tag = UnsafeMutablePointer<UInt8>.allocate(capacity: 16)
+status = EVP_CIPHER_CTX_ctrl(rsaEncryptCtx, EVP_CTRL_GCM_GET_TAG, 16, tag)
+guard status == 1 else {
+  let source = "Getting tag failed"
+  if let reason = CryptorRSA.getLastError(source: source) {
+    throw Error(code: ERR_ENCRYPTION_FAILED, reason: reason)
+  }
+  throw Error(code: ERR_ENCRYPTION_FAILED, reason: source + ": No OpenSSL error reported.")
+}
+let tagFinal = Data(bytes: tag, count: 16)
+
                 let cipher = Data(bytes: encrypted, count: Int(encLength))
                 let ekFinal = Data(bytes: ek!, count: Int(encKeyLength))
                 let ivFinal = Data(bytes: iv, count: Int(IVLength))
-                
-                return EncryptedData(with: ekFinal + cipher + ivFinal)
+                return EncryptedData(with: ekFinal + ivFinal + cipher + tagFinal)
                 
 			#else
 				
@@ -364,16 +377,20 @@ public class CryptorRSA {
                 
                 // Size of symmetric encryption
                 let encKeyLength = Int(EVP_PKEY_size(evp_key))
+print("decrypt: key length = \(encKeyLength)")
                 // Size of the corresponding cipher's IV
-				let encIVLength = Int(EVP_CIPHER_iv_length(.make(optional: encType)))
+                let encIVLength = Int(EVP_CIPHER_iv_length(.make(optional: encType)))
+print("decrypt: IV length = \(encIVLength)") 
                 // Size of encryptedKey
-                let encryptedDataLength = Int(self.data.count) - encKeyLength - encIVLength
+                let encryptedDataLength = Int(self.data.count) - encKeyLength - encIVLength - 16
+print("decrypt: data size = \(encryptedDataLength)")
                 
                 // Extract encryptedKey, encryptedData, encryptedIV from data
                 // self.data = encryptedKey + encryptedData + encryptedIV
                 let encryptedKey = self.data.subdata(in: 0..<encKeyLength)
-                let encryptedData = self.data.subdata(in: encKeyLength..<encKeyLength+encryptedDataLength)
-                let encryptedIV = self.data.subdata(in: encKeyLength+encryptedDataLength..<self.data.count)
+                let encryptedIV = self.data.subdata(in: encKeyLength..<encKeyLength+encIVLength)
+                let encryptedData = self.data.subdata(in: encKeyLength+encIVLength..<encKeyLength+encIVLength+encryptedDataLength)
+                var tagData = self.data.subdata(in: encKeyLength+encIVLength+encryptedDataLength..<self.data.count)
                 
 				let rsaDecryptCtx = EVP_CIPHER_CTX_new_wrapper()
 			
@@ -399,7 +416,7 @@ public class CryptorRSA {
                     })
                 })
                 guard status != 0 else {
-                    let source = "Decryption failed"
+                    let source = "Decryption failed (EVP_OpenInit)"
                     if let reason = CryptorRSA.getLastError(source: source) {
                         
                         throw Error(code: ERR_DECRYPTION_FAILED, reason: reason)
@@ -413,10 +430,19 @@ public class CryptorRSA {
                     return EVP_DecryptUpdate(rsaDecryptCtx, decrypted, &processedLen, enc, Int32(encryptedData.count))
                 })
                 decMsgLen = processedLen
-                
+status = tagData.withUnsafeMutableBytes({ (tag: UnsafeMutablePointer<UInt8>) -> Int32 in
+  return EVP_CIPHER_CTX_ctrl(rsaDecryptCtx, EVP_CTRL_GCM_SET_TAG, 16, tag)
+})
+guard status == 1 else {
+  let source = "Setting tag failed"
+  if let reason = CryptorRSA.getLastError(source: source) {
+    throw Error(code: ERR_DECRYPTION_FAILED, reason: reason)
+  }
+  throw Error(code: ERR_DECRYPTION_FAILED, reason: source + ": No OpenSSL error reported.")
+}
                 status = EVP_OpenFinal(rsaDecryptCtx, decrypted.advanced(by: Int(decMsgLen)), &processedLen)
                 guard status != 0 else {
-                    let source = "Decryption failed"
+                    let source = "Decryption failed (EVP_OpenFinal)"
                     if let reason = CryptorRSA.getLastError(source: source) {
                         
                         throw Error(code: ERR_DECRYPTION_FAILED, reason: reason)
