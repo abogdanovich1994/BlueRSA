@@ -256,7 +256,9 @@ public class CryptorRSA {
                 ekPtr.pointee = ek
                 
                 // Assign size of the corresponding cipher's IV
-				let IVLength = EVP_CIPHER_iv_length(.make(optional: enc))
+//                let IVLength = EVP_CIPHER_iv_length(.make(optional: enc))
+let IVLength = 16 // Match Apple implementation
+let tagLength = 16
                 let iv = UnsafeMutablePointer<UInt8>.allocate(capacity: Int(IVLength))
                print("encrypt: IV length = \(IVLength)") 
                 let encrypted = UnsafeMutablePointer<UInt8>.allocate(capacity: self.data.count + Int(IVLength))
@@ -278,7 +280,17 @@ public class CryptorRSA {
                     }
                     throw Error(code: ERR_ENCRYPTION_FAILED, reason: source + ": No OpenSSL error reported.")
                 }
-                
+// Set the IV to match Apple platforms
+var bytes: [UInt8] = [UInt8](repeating: 0x0, count: IVLength)
+iv.initialize(from: &bytes, count: IVLength)
+status = EVP_EncryptInit_ex(rsaEncryptCtx, nil, nil, nil, iv)
+guard status == 1 else {
+  let source = "Overwriting IV failed"
+  if let reason = CryptorRSA.getLastError(source: source) {
+    throw Error(code: ERR_ENCRYPTION_FAILED, reason: reason)
+  }
+  throw Error(code: ERR_ENCRYPTION_FAILED, reason: source + ": No OpenSSL error reported.")
+}
                 // EVP_SealUpdate is a complex macros and therefore the compiler doesnt
                 // convert it directly to swift. From /usr/local/opt/openssl/include/openssl/evp.h:
                 _ = self.data.withUnsafeBytes({ (plaintext: UnsafePointer<UInt8>) -> Int32 in
@@ -300,8 +312,8 @@ print("encrypt: processedLength = \(processedLength), dataLength = \(encLength)"
 print("encrypt: processedLength = \(processedLength), dataLength = \(encLength)")
 print("encrypt: key length = \(encKeyLength)")
 
-let tag = UnsafeMutablePointer<UInt8>.allocate(capacity: 16)
-status = EVP_CIPHER_CTX_ctrl(rsaEncryptCtx, EVP_CTRL_GCM_GET_TAG, 16, tag)
+let tag = UnsafeMutablePointer<UInt8>.allocate(capacity: tagLength)
+status = EVP_CIPHER_CTX_ctrl(rsaEncryptCtx, EVP_CTRL_GCM_GET_TAG, Int32(tagLength), tag)
 guard status == 1 else {
   let source = "Getting tag failed"
   if let reason = CryptorRSA.getLastError(source: source) {
@@ -313,8 +325,8 @@ let tagFinal = Data(bytes: tag, count: 16)
 
                 let cipher = Data(bytes: encrypted, count: Int(encLength))
                 let ekFinal = Data(bytes: ek!, count: Int(encKeyLength))
-                let ivFinal = Data(bytes: iv, count: Int(IVLength))
-                return EncryptedData(with: ekFinal + ivFinal + cipher + tagFinal)
+//                let ivFinal = Data(bytes: iv, count: Int(IVLength))
+                return EncryptedData(with: ekFinal + cipher + tagFinal)
                 
 			#else
 				
@@ -379,18 +391,22 @@ let tagFinal = Data(bytes: tag, count: 16)
                 let encKeyLength = Int(EVP_PKEY_size(evp_key))
 print("decrypt: key length = \(encKeyLength)")
                 // Size of the corresponding cipher's IV
-                let encIVLength = Int(EVP_CIPHER_iv_length(.make(optional: encType)))
+//                let encIVLength = Int(EVP_CIPHER_iv_length(.make(optional: encType)))
+let encIVLength = 16
 print("decrypt: IV length = \(encIVLength)") 
+let tagLength = 16
                 // Size of encryptedKey
-                let encryptedDataLength = Int(self.data.count) - encKeyLength - encIVLength - 16
+                let encryptedDataLength = Int(self.data.count) - encKeyLength - tagLength
 print("decrypt: data size = \(encryptedDataLength)")
                 
                 // Extract encryptedKey, encryptedData, encryptedIV from data
                 // self.data = encryptedKey + encryptedData + encryptedIV
                 let encryptedKey = self.data.subdata(in: 0..<encKeyLength)
-                let encryptedIV = self.data.subdata(in: encKeyLength..<encKeyLength+encIVLength)
-                let encryptedData = self.data.subdata(in: encKeyLength+encIVLength..<encKeyLength+encIVLength+encryptedDataLength)
-                var tagData = self.data.subdata(in: encKeyLength+encIVLength+encryptedDataLength..<self.data.count)
+//                let encryptedIV = self.data.subdata(in: encKeyLength..<encKeyLength+encIVLength)
+// 16-byte Zero IV to match Apple platform
+let encryptedIV = Data(repeating: 0x0, count: encIVLength)
+                let encryptedData = self.data.subdata(in: encKeyLength..<encKeyLength+encryptedDataLength)
+                var tagData = self.data.subdata(in: encKeyLength+encryptedDataLength..<self.data.count)
                 
 				let rsaDecryptCtx = EVP_CIPHER_CTX_new_wrapper()
 			
@@ -431,7 +447,7 @@ print("decrypt: data size = \(encryptedDataLength)")
                 })
                 decMsgLen = processedLen
 status = tagData.withUnsafeMutableBytes({ (tag: UnsafeMutablePointer<UInt8>) -> Int32 in
-  return EVP_CIPHER_CTX_ctrl(rsaDecryptCtx, EVP_CTRL_GCM_SET_TAG, 16, tag)
+  return EVP_CIPHER_CTX_ctrl(rsaDecryptCtx, EVP_CTRL_GCM_SET_TAG, Int32(tagLength), tag)
 })
 guard status == 1 else {
   let source = "Setting tag failed"
