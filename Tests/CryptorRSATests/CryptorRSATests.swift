@@ -521,6 +521,34 @@ class CryptorRSATests: XCTestCase {
         XCTAssertTrue(verificationResult)
     }
 
+    func test_ECDSA() {
+        let PemPrivateKey = """
+-----BEGIN EC PRIVATE KEY-----
+MHcCAQEEIJX+87WJ7Gh19sohyZnhxZeXYNOcuGv4Q+8MLge4UkaZoAoGCCqGSM49
+AwEHoUQDQgAEikc5m6C2xtDWeeAeT18WElO37zvFOz8p4kAlhvgIHN23XIClNESg
+KVmLgSSq2asqiwdrU5YHbcHFkgdABM1SPA==
+-----END EC PRIVATE KEY-----
+"""
+        let publicKey = """
+-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEikc5m6C2xtDWeeAeT18WElO37zvF
+Oz8p4kAlhvgIHN23XIClNESgKVmLgSSq2asqiwdrU5YHbcHFkgdABM1SPA==
+-----END PUBLIC KEY-----
+"""
+        let exampleData = "Example".data(using: .utf8)!
+        guard let ecdsaPrivateKey = CryptorECDSA.PrivateKey(pemKey: PemPrivateKey) else {
+            return XCTFail()
+        }
+        guard let ecdsaPublicKey = CryptorECDSA.PublicKey(pemKey: publicKey) else {
+            return XCTFail()
+        }
+        guard let signature = CryptorECDSA.createSignature(data: exampleData, privateKey: ecdsaPrivateKey) else {
+            return XCTFail()
+        }
+        let verified = CryptorECDSA.verifySignature(digestData: exampleData, signatureData: signature, publicKey: ecdsaPublicKey)
+        XCTAssert(verified == true)
+    }
+    
 	// MARK: Test Utilities
 	
 	struct TestError: Error {
