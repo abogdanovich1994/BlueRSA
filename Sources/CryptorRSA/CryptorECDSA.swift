@@ -44,12 +44,26 @@ public class CryptorECDSA {
         let digestData = Data(bytes: hash)
         
         var error: Unmanaged<CFError>? = nil
-        guard let signature = SecKeyCreateSignature(privateKey.nativeKey, .ecdsaSignatureDigestX962SHA256, digestData as CFData, &error) else {
+        guard let cfSignature = SecKeyCreateSignature(privateKey.nativeKey, .ecdsaSignatureMessageX962SHA256, digestData as CFData, &error)  else {
             let thrownError = error?.takeRetainedValue()
             print(thrownError as Any)
             return nil
         }
-        return signature as Data
+        let signature = cfSignature as Data
+        let (asnSig, _) = toASN1Element(data: signature)
+        guard case let ASN1Element.seq(elements: seq) = asnSig,
+            seq.count >= 2,
+            case let ASN1Element.bytes(data: rData) = seq[0],
+            case let ASN1Element.bytes(data: sData) = seq[1]
+        else {
+                return nil
+        }
+        let rExtra = rData.count - 32
+        let trimmedRData = rData.dropFirst(rExtra)
+        let sExtra = sData.count - 32
+        let trimmedSData = sData.dropFirst(sExtra)
+        let rsSignature = trimmedRData + trimmedSData
+        return rsSignature
         #endif
     }
     
@@ -67,7 +81,7 @@ public class CryptorECDSA {
         
         var error: Unmanaged<CFError>? = nil
         if SecKeyVerifySignature(publicKey.nativeKey,
-                                 .ecdsaSignatureDigestX962SHA256,
+                                 .ecdsaSignatureMessageX962SHA256,
                                  digestData as CFData,
                                  signatureData as CFData,
                                  &error)

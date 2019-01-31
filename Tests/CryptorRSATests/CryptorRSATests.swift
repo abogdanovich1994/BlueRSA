@@ -536,15 +536,27 @@ Oz8p4kAlhvgIHN23XIClNESgKVmLgSSq2asqiwdrU5YHbcHFkgdABM1SPA==
 -----END PUBLIC KEY-----
 """
         let exampleData = "Example".data(using: .utf8)!
+        let exampleJWTHeader = try! JSONSerialization.data(withJSONObject: ["alg": "ES256", "typ": "JWT"])
+        let exampleJWTClaims = try! JSONSerialization.data(withJSONObject: ["sub": "1234567890","admin": true, "iat": 1516239022])
+        
+        let unsignedJWT = exampleJWTHeader.base64urlEncodedString() + "." + exampleJWTClaims.base64urlEncodedString()
+        let unsignedData = unsignedJWT.data(using: .utf8)!
+        
         guard let ecdsaPrivateKey = CryptorECDSA.PrivateKey(pemKey: PemPrivateKey) else {
             return XCTFail()
         }
         guard let ecdsaPublicKey = CryptorECDSA.PublicKey(pemKey: publicKey) else {
             return XCTFail()
         }
-        guard let signature = CryptorECDSA.createSignature(data: exampleData, privateKey: ecdsaPrivateKey) else {
+//        guard let signature = CryptorECDSA.createSignature(data: exampleData, privateKey: ecdsaPrivateKey) else {
+//            return XCTFail()
+//        }
+        guard let jwtSignature = CryptorECDSA.createSignature(data: unsignedData, privateKey: ecdsaPrivateKey) else {
             return XCTFail()
         }
+        print(jwtSignature.count)
+        print(jwtSignature.base64urlEncodedString().count)
+        print(unsignedJWT + "." + jwtSignature.base64urlEncodedString())
         let verified = CryptorECDSA.verifySignature(digestData: exampleData, signatureData: signature, publicKey: ecdsaPublicKey)
         XCTAssert(verified == true)
     }
@@ -659,3 +671,21 @@ Oz8p4kAlhvgIHN23XIClNESgKVmLgSSq2asqiwdrU5YHbcHFkgdABM1SPA==
     }
 }
 
+extension Data {
+    func base64urlEncodedString() -> String {
+        let result = self.base64EncodedString()
+        return result.replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+    
+    init?(base64urlEncoded: String) {
+        let paddingLength = 4 - base64urlEncoded.count % 4
+        let padding = (paddingLength < 4) ? String(repeating: "=", count: paddingLength) : ""
+        let base64EncodedString = base64urlEncoded
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+            + padding
+        self.init(base64Encoded: base64EncodedString)
+    }
+}
