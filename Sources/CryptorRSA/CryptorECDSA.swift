@@ -39,31 +39,41 @@ public class CryptorECDSA {
         ECDSA_sign(0, dataBytes, Int32(dataBytes.count), signedBytes, signedBytesLength, privateKey.nativeKey)
         return Data(bytes: signedBytes, count: Int(signedBytesLength.pointee))
         #else
+        // MacOS, iOS ect.
+        
+        // SHA256 Digest must be exactly 32 bytes(CC_SHA256_DIGEST_LENGTH) for asymmetric encryption.
         var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
         CC_SHA256((data as NSData).bytes, CC_LONG(data.count), &hash)
         let digestData = Data(bytes: hash)
         
+        // Memory storage for error from SecKeyCreateSignature
         var error: Unmanaged<CFError>? = nil
-        guard let cfSignature = SecKeyCreateSignature(privateKey.nativeKey, .ecdsaSignatureMessageX962SHA256, digestData as CFData, &error)  else {
+        
+        // cfSignature is CFData that is ANS1 encoded as a sequence of two 32 Byte UInt (r and s)
+        guard let cfSignature = SecKeyCreateSignature(privateKey.nativeKey, .ecdsaSignatureDigestX962SHA256, digestData as CFData, &error)  else {
             let thrownError = error?.takeRetainedValue()
-            print(thrownError as Any)
+            print("cfSignature failed: \(thrownError as Any)")
             return nil
         }
         let signature = cfSignature as Data
+        // Parse ASN into just r,s data as defined in:
+        // https://tools.ietf.org/html/rfc7518#section-3.4
         let (asnSig, _) = toASN1Element(data: signature)
         guard case let ASN1Element.seq(elements: seq) = asnSig,
             seq.count >= 2,
             case let ASN1Element.bytes(data: rData) = seq[0],
             case let ASN1Element.bytes(data: sData) = seq[1]
         else {
-                return nil
+            print("Failed to decode cfSignature ASN1")
+            return nil
         }
+        // ASN adds 00 bytes in front of negative Int to mark it as positive.
+        // These must be removed to make r,a a valid EC signature
         let rExtra = rData.count - 32
         let trimmedRData = rData.dropFirst(rExtra)
         let sExtra = sData.count - 32
         let trimmedSData = sData.dropFirst(sExtra)
-        let rsSignature = trimmedRData + trimmedSData
-        return rsSignature
+        return trimmedRData + trimmedSData
         #endif
     }
     
@@ -75,21 +85,57 @@ public class CryptorECDSA {
         let verify = ECDSA_verify(0, dataBytes, Int32(dataBytes.count), signatureBytes, Int32(signatureBytes.count), publicKey.nativeKey)
         return verify == 1
         #else
+        // MacOS, iOS ect.
+        
+        // SHA256 Digest must be exactly 32 bytes(CC_SHA256_DIGEST_LENGTH) for asymmetric encryption.
         var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
         CC_SHA256((digestData as NSData).bytes, CC_LONG(digestData.count), &hash)
         let digestData = Data(bytes: hash)
         
+        // Signature must be 64 bytes or it is invalid
+        guard signatureData.count == 64 else {
+            print("invalid signatureData length: \(signatureData.count)")
+            return false
+        }
+        
+        // Convert r,s signature to ASN1 for SecKeyVerifySignature
+        var asnSignature = Data()
+        // r value is first 32 bytes
+        var rSig =  Data(signatureData.dropLast(32))
+        // If first bit is 1, add a 00 byte to mark it as positive for ASN1
+        if rSig[0].leadingZeroBitCount == 0 {
+            rSig = Data(count: 1) + rSig
+        }
+        // r value is last 32 bytes
+        var sSig = Data(signatureData.dropFirst(32))
+        // If first bit is 1, add a 00 byte to mark it as positive for ASN1
+        if sSig[0].leadingZeroBitCount == 0 {
+            sSig = Data(count: 1) + sSig
+        }
+        // Count Byte lengths for ASN1 length bytes
+        let rLengthByte = UInt8(rSig.count)
+        let sLengthByte = UInt8(sSig.count)
+        // total bytes is r + s + rLengthByte + sLengthByte byte + Integer marking bytes
+        let tLengthByte = rLengthByte + sLengthByte + 4
+        // 0x30 means sequence, 0x02 means Integer
+        asnSignature.append(contentsOf: [0x30, tLengthByte, 0x02, rLengthByte])
+        asnSignature.append(rSig)
+        asnSignature.append(contentsOf: [0x02, sLengthByte])
+        asnSignature.append(sSig)
+        
+        // Memory storage for error from SecKeyVerifySignature
+        // ecdsaSignatureDigestX962SHA256 is p-256 sha-256 ECDSA
         var error: Unmanaged<CFError>? = nil
         if SecKeyVerifySignature(publicKey.nativeKey,
-                                 .ecdsaSignatureMessageX962SHA256,
+                                 .ecdsaSignatureDigestX962SHA256,
                                  digestData as CFData,
-                                 signatureData as CFData,
+                                 asnSignature as CFData,
                                  &error)
         {
             return true
         } else {
             let thrownError = error?.takeRetainedValue()
-            print(thrownError as Any)
+            print("Failed to verify asnSignature: \(thrownError as Any)")
             return false
         }
         #endif
