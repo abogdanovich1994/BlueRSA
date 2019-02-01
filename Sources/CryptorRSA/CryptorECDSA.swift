@@ -175,8 +175,10 @@ public class CryptorECDSA {
         #endif
         let nativeKey: NativeKey
         
-        #if !os(Linux)
         public init?(p8Key: String) {
+            #if os(Linux)
+            return PrivateKey(pemKey: p8Key)
+            #else
             guard let asn1Key = CryptorECDSA.toASN1(key: p8Key) else {
                 return nil
             }
@@ -189,9 +191,9 @@ public class CryptorECDSA {
             }
             let (octest, _) = toASN1Element(data: privateOctest)
             guard case let ASN1Element.seq(elements: seq) = octest,
-                seq.count > 3,
+                seq.count >= 3,
                 case let ASN1Element.bytes(data: privateKeyData) = seq[1],
-                case let ASN1Element.constructed(tag: _, elem: publicElement) = seq[3],
+                case let ASN1Element.constructed(tag: _, elem: publicElement) = seq[2],
                 case let ASN1Element.bytes(data: publicKeyData) = publicElement else {
                     return nil
             }
@@ -206,8 +208,8 @@ public class CryptorECDSA {
                 return nil
             }
             self.nativeKey = secKey
+            #endif
         }
-         #endif
         
         public init?(pemKey: String) {
             #if os(Linux)

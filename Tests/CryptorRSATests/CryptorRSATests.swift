@@ -520,40 +520,97 @@ class CryptorRSATests: XCTestCase {
         let verificationResult = try message.verify(with: tokenPublicKey, signature: signature, algorithm: .sha256)
         XCTAssertTrue(verificationResult)
     }
-
-    func test_ECDSA() {
-        let PemPrivateKey = """
+    
+    let ecPemPrivateKey = """
 -----BEGIN EC PRIVATE KEY-----
 MHcCAQEEIJX+87WJ7Gh19sohyZnhxZeXYNOcuGv4Q+8MLge4UkaZoAoGCCqGSM49
 AwEHoUQDQgAEikc5m6C2xtDWeeAeT18WElO37zvFOz8p4kAlhvgIHN23XIClNESg
 KVmLgSSq2asqiwdrU5YHbcHFkgdABM1SPA==
 -----END EC PRIVATE KEY-----
 """
-        let publicKey = """
+    let ecPemPublicKey = """
 -----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEikc5m6C2xtDWeeAeT18WElO37zvF
 Oz8p4kAlhvgIHN23XIClNESgKVmLgSSq2asqiwdrU5YHbcHFkgdABM1SPA==
 -----END PUBLIC KEY-----
 """
+    let ecP8PrivateKey = """
+-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQglf7ztYnsaHX2yiHJ
+meHFl5dg05y4a/hD7wwuB7hSRpmhRANCAASKRzmboLbG0NZ54B5PXxYSU7fvO8U7
+PyniQCWG+Agc3bdcgKU0RKApWYuBJKrZqyqLB2tTlgdtwcWSB0AEzVI8
+-----END PRIVATE KEY-----
+"""
+    let ecP8PublicKey =
+"""
+-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEikc5m6C2xtDWeeAeT18WElO37zvF
+Oz8p4kAlhvgIHN23XIClNESgKVmLgSSq2asqiwdrU5YHbcHFkgdABM1SPA==
+-----END PUBLIC KEY-----
+"""
+    func test_PemECDSACycle() {
         let exampleJWTHeader = try! JSONSerialization.data(withJSONObject: ["alg": "ES256", "typ": "JWT"])
         let exampleJWTClaims = try! JSONSerialization.data(withJSONObject: ["sub": "1234567890","admin": true, "iat": 1516239022])
         
         let unsignedJWT = exampleJWTHeader.base64urlEncodedString() + "." + exampleJWTClaims.base64urlEncodedString()
         let unsignedData = unsignedJWT.data(using: .utf8)!
         
-        guard let ecdsaPrivateKey = CryptorECDSA.PrivateKey(pemKey: PemPrivateKey) else {
+        guard let ecdsaPrivateKey = CryptorECDSA.PrivateKey(pemKey: ecPemPrivateKey) else {
             return XCTFail()
         }
-        guard let ecdsaPublicKey = CryptorECDSA.PublicKey(pemKey: publicKey) else {
+        guard let ecdsaPublicKey = CryptorECDSA.PublicKey(pemKey: ecPemPublicKey) else {
             return XCTFail()
         }
         guard let jwtSignature = CryptorECDSA.createSignature(data: unsignedData, privateKey: ecdsaPrivateKey) else {
             return XCTFail()
         }
-        print(jwtSignature.count)
-        print(jwtSignature.base64urlEncodedString().count)
-        print(unsignedJWT + "." + jwtSignature.base64urlEncodedString())
         let verified = CryptorECDSA.verifySignature(digestData: unsignedData, signatureData: jwtSignature, publicKey: ecdsaPublicKey)
+        XCTAssert(verified == true)
+    }
+    
+    func test_P8ECDSACycle() {
+        let exampleJWTHeader = try! JSONSerialization.data(withJSONObject: ["alg": "ES256", "typ": "JWT"])
+        let exampleJWTClaims = try! JSONSerialization.data(withJSONObject: ["sub": "1234567890","admin": true, "iat": 1516239022])
+        
+        let unsignedJWT = exampleJWTHeader.base64urlEncodedString() + "." + exampleJWTClaims.base64urlEncodedString()
+        let unsignedData = unsignedJWT.data(using: .utf8)!
+        
+        guard let ecdsaPrivateKey = CryptorECDSA.PrivateKey(p8Key: ecP8PrivateKey) else {
+            return XCTFail()
+        }
+        guard let ecdsaPublicKey = CryptorECDSA.PublicKey(pemKey: ecP8PublicKey) else {
+            return XCTFail()
+        }
+        guard let jwtSignature = CryptorECDSA.createSignature(data: unsignedData, privateKey: ecdsaPrivateKey) else {
+            return XCTFail()
+        }
+        let verified = CryptorECDSA.verifySignature(digestData: unsignedData, signatureData: jwtSignature, publicKey: ecdsaPublicKey)
+        XCTAssert(verified == true)
+    }
+    
+    func test_PemECDSAVerify() {
+        // generated from jwt.io
+        let JWTDigest =  "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWUsImlhdCI6MTUxNjIzOTAyMn0".data(using: .utf8)!
+        let JWTSignature = Data(base64urlEncoded: "jGeUQXuf4WLuqhCHOdrIr2alE4JQyKQwkj-GbZIXQIpwrKLymEd41bka2PSIqRAA6H1A2kLuXhzwFw02qQdMhw")!
+
+        guard let ecdsaPublicKey = CryptorECDSA.PublicKey(pemKey: ecPemPublicKey) else {
+            return XCTFail()
+        }
+
+        let verified = CryptorECDSA.verifySignature(digestData: JWTDigest, signatureData: JWTSignature, publicKey: ecdsaPublicKey)
+        XCTAssert(verified == true)
+    }
+    
+    func test_P8ECDSAVerify() {
+        // generated from jwt.io
+        let JWTDigest =  "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWUsImlhdCI6MTUxNjIzOTAyMn0".data(using: .utf8)!
+        let JWTSignature = Data(base64urlEncoded: "faLW3RiQtUG6U71gCrGEBY7AWNfYphygJQKoW8apoB4beX_-GFhkBwkcZATXKIL8UoFLHqmdKK97vO2Nv3OWDA")!
+        
+        guard let ecdsaPublicKey = CryptorECDSA.PublicKey(pemKey: ecPemPublicKey) else {
+            return XCTFail()
+        }
+        
+        let verified = CryptorECDSA.verifySignature(digestData: JWTDigest, signatureData: JWTSignature, publicKey: ecdsaPublicKey)
         XCTAssert(verified == true)
     }
     
@@ -663,6 +720,10 @@ Oz8p4kAlhvgIHN23XIClNESgKVmLgSSq2asqiwdrU5YHbcHFkgdABM1SPA==
 			("test_signVerifyAllDigestTypes", test_signVerifyAllDigestTypes),
 			("test_signVerifyBase64", test_signVerifyBase64),
             ("test_verifyAppIDToken", test_verifyAppIDToken),
+            ("test_ECDSACycle", test_PemECDSACycle),
+            ("test_P8ECDSACycle", test_P8ECDSACycle),
+            ("test_PemECDSAVerify", test_PemECDSAVerify),
+            ("test_P8ECDSAVerify", test_P8ECDSAVerify),
         ]
     }
 }
