@@ -177,7 +177,7 @@ public class CryptorECDSA {
         
         public init?(p8Key: String) {
             #if os(Linux)
-            return PrivateKey(pemKey: p8Key)
+            self.init(pemKey: p8Key)
             #else
             guard let asn1Key = CryptorECDSA.toASN1(key: p8Key) else {
                 return nil
@@ -213,6 +213,9 @@ public class CryptorECDSA {
         
         public init?(pemKey: String) {
             #if os(Linux)
+                guard let key = pemKey.data(using: .utf8) else {
+                    return nil
+                }
                 let bio = BIO_new(BIO_s_mem())
                 key.withUnsafeBytes { (bytes: UnsafePointer<Int8>) -> Void in
                     BIO_puts(bio, bytes)
@@ -257,6 +260,9 @@ public class CryptorECDSA {
         
         public init?(pemKey: String) {
             #if os(Linux)
+                guard let key = pemKey.data(using: .utf8) else {
+                    return nil
+                }
                 let bio = BIO_new(BIO_s_mem())
                 key.withUnsafeBytes { (bytes: UnsafePointer<Int8>) -> Void in
                     BIO_puts(bio, bytes)
