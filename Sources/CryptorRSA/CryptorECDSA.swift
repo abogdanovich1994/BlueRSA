@@ -155,8 +155,7 @@ public class CryptorECDSA {
                                  .ecdsaSignatureDigestX962SHA256,
                                  hashedData as CFData,
                                  asnSignature as CFData,
-                                 &error)
-        {
+                                 &error) {
             return true
         } else {
             let thrownError = error?.takeRetainedValue()
@@ -267,7 +266,7 @@ public class CryptorECDSA {
                 key.withUnsafeBytes { (bytes: UnsafePointer<Int8>) -> Void in
                     BIO_puts(bio, bytes)
                 }
-                let privateKey = PEM_read_bio_ECPublicKey(bio, nil, nil, nil)
+                let privateKey = PEM_read_bio_EC_PUBKEY(bio, nil, nil, nil)
                 BIO_free(bio)
                 self.nativeKey = privateKey
             #else
@@ -328,7 +327,7 @@ public class CryptorECDSA {
             
         case 0x02: // integer
             let (length, lengthOfLength) = readLength(data: data.advanced(by: 1))
-            if (length < 8) {
+            if length < 8 {
                 var result: Int = 0
                 let subdata = data.advanced(by: 1 + lengthOfLength)
                 // ignore negative case
@@ -370,6 +369,7 @@ public class CryptorECDSA {
     private static func toASN1(key: String) -> Data? {
         let base64 = key
             .split(separator: "\n")
+            .map({String($0)})
             .filter({ $0.hasPrefix("-----") == false })
             .joined(separator: "")
         guard let asn1 = Data(base64Encoded: base64) else {

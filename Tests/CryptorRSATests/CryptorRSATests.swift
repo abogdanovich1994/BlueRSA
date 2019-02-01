@@ -549,11 +549,16 @@ Oz8p4kAlhvgIHN23XIClNESgKVmLgSSq2asqiwdrU5YHbcHFkgdABM1SPA==
 -----END PUBLIC KEY-----
 """
     func test_PemECDSACycle() {
-        let exampleJWTHeader = try! JSONSerialization.data(withJSONObject: ["alg": "ES256", "typ": "JWT"])
-        let exampleJWTClaims = try! JSONSerialization.data(withJSONObject: ["sub": "1234567890","admin": true, "iat": 1516239022])
+        guard let exampleJWTHeader = try? JSONSerialization.data(withJSONObject: ["alg": "ES256", "typ": "JWT"]),
+            let exampleJWTClaims = try? JSONSerialization.data(withJSONObject: ["sub": "1234567890", "admin": true, "iat": 1516239022])
+            else {
+            return XCTFail("Failed to serialize JWT to JSON")
+        }
         
         let unsignedJWT = exampleJWTHeader.base64urlEncodedString() + "." + exampleJWTClaims.base64urlEncodedString()
-        let unsignedData = unsignedJWT.data(using: .utf8)!
+        guard let unsignedData = unsignedJWT.data(using: .utf8) else {
+            return XCTFail("Failed to encode unsignedJWT to utf8")
+        }
         
         guard let ecdsaPrivateKey = CryptorECDSA.PrivateKey(pemKey: ecPemPrivateKey) else {
             return XCTFail()
@@ -569,11 +574,16 @@ Oz8p4kAlhvgIHN23XIClNESgKVmLgSSq2asqiwdrU5YHbcHFkgdABM1SPA==
     }
     
     func test_P8ECDSACycle() {
-        let exampleJWTHeader = try! JSONSerialization.data(withJSONObject: ["alg": "ES256", "typ": "JWT"])
-        let exampleJWTClaims = try! JSONSerialization.data(withJSONObject: ["sub": "1234567890","admin": true, "iat": 1516239022])
+        guard let exampleJWTHeader = try? JSONSerialization.data(withJSONObject: ["alg": "ES256", "typ": "JWT"]),
+            let exampleJWTClaims = try? JSONSerialization.data(withJSONObject: ["sub": "1234567890", "admin": true, "iat": 1516239022])
+            else {
+                return XCTFail("Failed to serialize JWT to JSON")
+        }
         
         let unsignedJWT = exampleJWTHeader.base64urlEncodedString() + "." + exampleJWTClaims.base64urlEncodedString()
-        let unsignedData = unsignedJWT.data(using: .utf8)!
+        guard let unsignedData = unsignedJWT.data(using: .utf8) else {
+            return XCTFail("Failed to encode unsignedJWT to utf8")
+        }
         
         guard let ecdsaPrivateKey = CryptorECDSA.PrivateKey(p8Key: ecP8PrivateKey) else {
             return XCTFail()
@@ -590,8 +600,10 @@ Oz8p4kAlhvgIHN23XIClNESgKVmLgSSq2asqiwdrU5YHbcHFkgdABM1SPA==
     
     func test_PemECDSAVerify() {
         // generated from jwt.io
-        let JWTDigest =  "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWUsImlhdCI6MTUxNjIzOTAyMn0".data(using: .utf8)!
-        let JWTSignature = Data(base64urlEncoded: "jGeUQXuf4WLuqhCHOdrIr2alE4JQyKQwkj-GbZIXQIpwrKLymEd41bka2PSIqRAA6H1A2kLuXhzwFw02qQdMhw")!
+        guard let JWTDigest =  "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWUsImlhdCI6MTUxNjIzOTAyMn0".data(using: .utf8),
+            let JWTSignature = Data(base64urlEncoded: "jGeUQXuf4WLuqhCHOdrIr2alE4JQyKQwkj-GbZIXQIpwrKLymEd41bka2PSIqRAA6H1A2kLuXhzwFw02qQdMhw") else {
+                return XCTFail("Failed to create JWT digest")
+        }
 
         guard let ecdsaPublicKey = CryptorECDSA.PublicKey(pemKey: ecPemPublicKey) else {
             return XCTFail()
@@ -603,8 +615,10 @@ Oz8p4kAlhvgIHN23XIClNESgKVmLgSSq2asqiwdrU5YHbcHFkgdABM1SPA==
     
     func test_P8ECDSAVerify() {
         // generated from jwt.io
-        let JWTDigest =  "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWUsImlhdCI6MTUxNjIzOTAyMn0".data(using: .utf8)!
-        let JWTSignature = Data(base64urlEncoded: "faLW3RiQtUG6U71gCrGEBY7AWNfYphygJQKoW8apoB4beX_-GFhkBwkcZATXKIL8UoFLHqmdKK97vO2Nv3OWDA")!
+        guard let JWTDigest =  "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWUsImlhdCI6MTUxNjIzOTAyMn0".data(using: .utf8),
+            let JWTSignature = Data(base64urlEncoded: "faLW3RiQtUG6U71gCrGEBY7AWNfYphygJQKoW8apoB4beX_-GFhkBwkcZATXKIL8UoFLHqmdKK97vO2Nv3OWDA") else {
+                return XCTFail("Failed to create JWT digest")
+        }
         
         guard let ecdsaPublicKey = CryptorECDSA.PublicKey(pemKey: ecPemPublicKey) else {
             return XCTFail()
