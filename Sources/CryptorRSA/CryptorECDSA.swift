@@ -46,8 +46,14 @@ public class CryptorECDSA {
         let signedBytes = UnsafeMutablePointer<UInt8>.allocate(capacity: 73)
         let signedBytesLength = UnsafeMutablePointer<UInt32>.allocate(capacity: 1)
         defer {
-            signedBytes.deallocate()
-            signedBytesLength.deallocate()
+            #if swift(>=4.1)
+                signedBytes.deallocate()
+                signedBytesLength.deallocate()
+            #else
+                signedBytes.deallocate(capacity: 73)
+                signedBytesLength.deallocate(capacity: 1)
+            #endif
+            
         }
         ECDSA_sign(0, hash, Int32(hash.count), signedBytes, signedBytesLength, privateKey.nativeKey)
         signature = Data(bytes: signedBytes, count: Int(signedBytesLength.pointee))
