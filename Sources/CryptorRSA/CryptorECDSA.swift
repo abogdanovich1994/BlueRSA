@@ -28,34 +28,49 @@ public class CryptorECDSA {
     // Sign the data using the given private key.
     // The signature is two integers in ASN1 format
     public static func createSignature(data: Data, privateKey: PrivateKey) -> Data? {
+        
+        let signature: Data
+        
         #if os(Linux)
-        let dataBytes = [UInt8](data)
+        // Hash digest to 256 bytes
+        var hash = [UInt8](repeating: 0, count: CC_LONG(SHA256_DIGEST_LENGTH))
+        let digestContext = EVP_MD_CTX_create()
+        // EVP_Digest return 1 for success or 0 for fail
+        EVP_DigestInit(digestContext, EVP_sha256())
+        _ = data.withUnsafeBytes { (message: UnsafePointer<UInt8>) -> Int32 in
+            return EVP_DigestUpdate(digestContext, message, data.count)
+        }
+        EVP_DigestFinal(digestContext, &hash, nil)
+        EVP_MD_CTX_destroy(digestContext)
+        
         let signedBytes = UnsafeMutablePointer<UInt8>.allocate(capacity: 73)
         let signedBytesLength = UnsafeMutablePointer<UInt32>.allocate(capacity: 1)
         defer {
             signedBytes.deallocate()
             signedBytesLength.deallocate()
         }
-        ECDSA_sign(0, dataBytes, Int32(dataBytes.count), signedBytes, signedBytesLength, privateKey.nativeKey)
-        return Data(bytes: signedBytes, count: Int(signedBytesLength.pointee))
+        ECDSA_sign(0, hash, Int32(hash.count), signedBytes, signedBytesLength, privateKey.nativeKey)
+        signature = Data(bytes: signedBytes, count: Int(signedBytesLength.pointee))
         #else
         // MacOS, iOS ect.
         
         // SHA256 Digest must be exactly 32 bytes(CC_SHA256_DIGEST_LENGTH) for asymmetric encryption.
         var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
         CC_SHA256((data as NSData).bytes, CC_LONG(data.count), &hash)
-        let digestData = Data(bytes: hash)
+        let hashedData = Data(bytes: hash)
         
         // Memory storage for error from SecKeyCreateSignature
         var error: Unmanaged<CFError>? = nil
         
         // cfSignature is CFData that is ANS1 encoded as a sequence of two 32 Byte UInt (r and s)
-        guard let cfSignature = SecKeyCreateSignature(privateKey.nativeKey, .ecdsaSignatureDigestX962SHA256, digestData as CFData, &error)  else {
+        guard let cfSignature = SecKeyCreateSignature(privateKey.nativeKey, .ecdsaSignatureDigestX962SHA256, hashedData as CFData, &error)  else {
             let thrownError = error?.takeRetainedValue()
             print("cfSignature failed: \(thrownError as Any)")
             return nil
         }
-        let signature = cfSignature as Data
+        signature = cfSignature as Data
+        #endif
+        
         // Parse ASN into just r,s data as defined in:
         // https://tools.ietf.org/html/rfc7518#section-3.4
         let (asnSig, _) = toASN1Element(data: signature)
@@ -74,23 +89,10 @@ public class CryptorECDSA {
         let sExtra = sData.count - 32
         let trimmedSData = sData.dropFirst(sExtra)
         return trimmedRData + trimmedSData
-        #endif
     }
     
     // Verify the signature using the given public key.
     public static func verifySignature(digestData: Data, signatureData: Data, publicKey: PublicKey) -> Bool {
-        #if os(Linux)
-        let dataBytes = [UInt8](digestData)
-        let signatureBytes = [UInt8](signatureData)
-        let verify = ECDSA_verify(0, dataBytes, Int32(dataBytes.count), signatureBytes, Int32(signatureBytes.count), publicKey.nativeKey)
-        return verify == 1
-        #else
-        // MacOS, iOS ect.
-        
-        // SHA256 Digest must be exactly 32 bytes(CC_SHA256_DIGEST_LENGTH) for asymmetric encryption.
-        var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-        CC_SHA256((digestData as NSData).bytes, CC_LONG(digestData.count), &hash)
-        let digestData = Data(bytes: hash)
         
         // Signature must be 64 bytes or it is invalid
         guard signatureData.count == 64 else {
@@ -123,12 +125,35 @@ public class CryptorECDSA {
         asnSignature.append(contentsOf: [0x02, sLengthByte])
         asnSignature.append(sSig)
         
+        #if os(Linux)
+        // Hash digest to 256 bytes
+        var hash = [UInt8](repeating: 0, count: CC_LONG(SHA256_DIGEST_LENGTH))
+        let digestContext = EVP_MD_CTX_create()
+        // EVP_Digest return 1 for success or 0 for fail
+        EVP_DigestInit(digestContext, EVP_sha256())
+        _ = digestData.withUnsafeBytes { (message: UnsafePointer<UInt8>) -> Int32 in
+            return EVP_DigestUpdate(digestContext, message, digestData.count)
+        }
+        EVP_DigestFinal(digestContext, &hash, nil)
+        EVP_MD_CTX_destroy(digestContext)
+        
+        let signatureBytes = [UInt8](asnSignature)
+        let verify = ECDSA_verify(0, hash, Int32(hash.count), signatureBytes, Int32(signatureBytes.count), publicKey.nativeKey)
+        return verify == 1
+        #else
+        // MacOS, iOS ect.
+        
+        // SHA256 Digest must be exactly 32 bytes(CC_SHA256_DIGEST_LENGTH) for asymmetric encryption.
+        var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        CC_SHA256((digestData as NSData).bytes, CC_LONG(digestData.count), &hash)
+        let hashedData = Data(bytes: hash)
+        
         // Memory storage for error from SecKeyVerifySignature
         // ecdsaSignatureDigestX962SHA256 is p-256 sha-256 ECDSA
         var error: Unmanaged<CFError>? = nil
         if SecKeyVerifySignature(publicKey.nativeKey,
                                  .ecdsaSignatureDigestX962SHA256,
-                                 digestData as CFData,
+                                 hashedData as CFData,
                                  asnSignature as CFData,
                                  &error)
         {
@@ -150,6 +175,7 @@ public class CryptorECDSA {
         #endif
         let nativeKey: NativeKey
         
+        #if !os(Linux)
         public init?(p8Key: String) {
             guard let asn1Key = CryptorECDSA.toASN1(key: p8Key) else {
                 return nil
@@ -171,55 +197,51 @@ public class CryptorECDSA {
             }
             
             let keyData = publicKeyData.drop(while: { $0 == 0x00}) + privateKeyData
-            guard let nativeKey = CryptorECDSA.PrivateKey.keyDataToNativeKey(key: keyData) else {
+            var error: Unmanaged<CFError>? = nil
+            guard let secKey = SecKeyCreateWithData(keyData as CFData,
+                                                    [kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom, kSecAttrKeyClass: kSecAttrKeyClassPrivate, kSecAttrKeySizeInBits: 256] as CFDictionary, &error)
+            else {
+                let thrownError = error?.takeRetainedValue()
+                print(thrownError as Any)
                 return nil
             }
-            self.nativeKey = nativeKey
+            self.nativeKey = secKey
         }
+         #endif
         
         public init?(pemKey: String) {
-            guard let asn1Key = CryptorECDSA.toASN1(key: pemKey) else {
-                return nil
-            }
-            let (result, _) = toASN1Element(data: asn1Key)
-            guard case let ASN1Element.seq(elements: seq) = result,
-                seq.count > 3,
-                case let ASN1Element.bytes(data: privateKeyData) = seq[1],
-                case let ASN1Element.constructed(tag: _, elem: publicElement) = seq[3],
-                case let ASN1Element.bytes(data: publicKeyData) = publicElement else {
-                    return nil
-            }
-            
-            let keyData = publicKeyData.drop(while: { $0 == 0x00}) + privateKeyData
-            guard let nativeKey = CryptorECDSA.PrivateKey.keyDataToNativeKey(key: keyData) else {
-                return nil
-            }
-            self.nativeKey = nativeKey
-        }
-        
-        private static func keyDataToNativeKey(key: Data) ->  NativeKey? {
             #if os(Linux)
-            // This is not currently producing a working ecKey.
-            // Investigate using EC_KEY_oct2priv()
-            let keyBytes = [UInt8](key)
-            let privateKeyBigNum = BN_new()
-            BN_bin2bn(keyBytes, Int32(keyBytes.count), privateKeyBigNum)
-            let eckey = EC_KEY_new_by_curve_name(NID_secp256k1)
-            EC_KEY_set_private_key(eckey, privateKeyBigNum)
-            return eckey
+                let bio = BIO_new(BIO_s_mem())
+                key.withUnsafeBytes { (bytes: UnsafePointer<Int8>) -> Void in
+                    BIO_puts(bio, bytes)
+                }
+                let privateKey = PEM_read_bio_ECPrivateKey(bio, nil, nil, nil)
+                BIO_free(bio)
+                self.nativeKey = privateKey
             #else
-            var error: Unmanaged<CFError>? = nil
-            guard let secKey = SecKeyCreateWithData(key as CFData,
-                                                    [kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom, kSecAttrKeyClass: kSecAttrKeyClassPrivate, kSecAttrKeySizeInBits: 256] as CFDictionary, &error)
+                guard let asn1Key = CryptorECDSA.toASN1(key: pemKey) else {
+                    return nil
+                }
+                let (result, _) = toASN1Element(data: asn1Key)
+                guard case let ASN1Element.seq(elements: seq) = result,
+                    seq.count > 3,
+                    case let ASN1Element.bytes(data: privateKeyData) = seq[1],
+                    case let ASN1Element.constructed(tag: _, elem: publicElement) = seq[3],
+                    case let ASN1Element.bytes(data: publicKeyData) = publicElement else {
+                        return nil
+                }
+            
+                let keyData = publicKeyData.drop(while: { $0 == 0x00}) + privateKeyData
+                var error: Unmanaged<CFError>? = nil
+                guard let secKey = SecKeyCreateWithData(keyData as CFData,
+                                                        [kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom, kSecAttrKeyClass: kSecAttrKeyClassPrivate, kSecAttrKeySizeInBits: 256] as CFDictionary, &error)
                 else {
                     let thrownError = error?.takeRetainedValue()
                     print(thrownError as Any)
                     return nil
-            }
-            return secKey
+                }
+                self.nativeKey = secKey
             #endif
-            
-            
         }
     }
     
@@ -232,44 +254,34 @@ public class CryptorECDSA {
         let nativeKey: NativeKey
         
         public init?(pemKey: String) {
-            guard let asn1Key = CryptorECDSA.toASN1(key: pemKey) else {
-                return nil
-            }
-            let (result, _) = toASN1Element(data: asn1Key)
-            guard case let ASN1Element.seq(elements: seq) = result,
-                seq.count > 1,
-                case let ASN1Element.bytes(data: publicKeyData) = seq[1] else {
-                    return nil
-            }
-            let keyData = publicKeyData.drop(while: { $0 == 0x00})
-            guard let nativeKey = CryptorECDSA.PublicKey.keyDataToNativeKey(key: keyData) else {
-                return nil
-            }
-            self.nativeKey = nativeKey
-        }
-        
-        private static func keyDataToNativeKey(key: Data) ->  NativeKey? {
             #if os(Linux)
-            // This is not currently producing a working ecKey
-            // Investigate using EC_KEY_oct2key()
-            let ecGroup = EC_GROUP_new_by_curve_name(NID_secp256k1)
-            let eckey = EC_KEY_new_by_curve_name(NID_secp256k1)
-            let ecPoint = EC_POINT_new(ecGroup)
-            let bigNumCtx = BN_CTX_new()
-            let keyBytes = [UInt8](key)
-            EC_POINT_oct2point(ecGroup, ecPoint, keyBytes, keyBytes.count, bigNumCtx)
-            EC_KEY_set_public_key(eckey, ecPoint)
-            return eckey
+                let bio = BIO_new(BIO_s_mem())
+                key.withUnsafeBytes { (bytes: UnsafePointer<Int8>) -> Void in
+                    BIO_puts(bio, bytes)
+                }
+                let privateKey = PEM_read_bio_ECPublicKey(bio, nil, nil, nil)
+                BIO_free(bio)
+                self.nativeKey = privateKey
             #else
-            var error: Unmanaged<CFError>? = nil
-            guard let secKey = SecKeyCreateWithData(key as CFData,
-                                                    [kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom, kSecAttrKeyClass: kSecAttrKeyClassPublic, kSecAttrKeySizeInBits: 256] as CFDictionary, &error)
-                else {
-                    let thrownError = error?.takeRetainedValue()
-                    print(thrownError as Any)
+                guard let asn1Key = CryptorECDSA.toASN1(key: pemKey) else {
                     return nil
-            }
-            return secKey
+                }
+                let (result, _) = toASN1Element(data: asn1Key)
+                guard case let ASN1Element.seq(elements: seq) = result,
+                    seq.count > 1,
+                    case let ASN1Element.bytes(data: publicKeyData) = seq[1] else {
+                        return nil
+                }
+                let keyData = publicKeyData.drop(while: { $0 == 0x00})
+                var error: Unmanaged<CFError>? = nil
+                guard let secKey = SecKeyCreateWithData(keyData as CFData,
+                                                        [kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom, kSecAttrKeyClass: kSecAttrKeyClassPublic, kSecAttrKeySizeInBits: 256] as CFDictionary, &error)
+                    else {
+                        let thrownError = error?.takeRetainedValue()
+                        print(thrownError as Any)
+                        return nil
+                }
+                self.nativeKey = secKey
             #endif
         }
     }
